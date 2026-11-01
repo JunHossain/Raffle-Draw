@@ -45,6 +45,10 @@
   .reveal #photo, .reveal #placeholder, .reveal #name { animation: pop .7s cubic-bezier(.2,.9,.3,1.2); }
   @keyframes pop { 0% { transform: scale(.88); } 100% { transform: scale(1); } }
   #controls { position: absolute; bottom: 28px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  #controls .row { margin: 0; gap: 12px; }
+  #absentBtn.armed { border-color: #e0a94a; color: #e0a94a; }
+  #absentList { margin-top: 28px; color: var(--mute); font-size: .85rem; letter-spacing: .05em; max-width: 90vw; line-height: 1.7; }
+  #absentList b { color: var(--fg); font-weight: 500; }
   .hint { color: var(--mute); font-size: .75rem; letter-spacing: .15em; }
 
   #grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; width: min(1100px, 94vw); }
@@ -84,8 +88,11 @@
   <div id="name"></div>
   <div id="pid"></div>
   <div id="controls">
-    <button class="primary" id="drawBtn">Draw winner</button>
-    <div class="hint">SPACE / ENTER</div>
+    <div class="row">
+      <button id="absentBtn" hidden>Absent · Redraw</button>
+      <button class="primary" id="drawBtn">Draw winner</button>
+    </div>
+    <div class="hint">SPACE / ENTER = draw · R = absent, redraw</div>
   </div>
 </section>
 
@@ -93,6 +100,7 @@
 <section id="summary" class="screen">
   <h1>Winners</h1>
   <div id="grid"></div>
+  <div id="absentList" hidden></div>
 </section>
 
 <canvas id="confetti"></canvas>
@@ -106,6 +114,7 @@
   let imageFiles = new Map();  // lowercased filename -> File
   let remaining = [];
   let winners = [];
+  let absent = [];             // winners who weren't present; excluded from all later draws
   let busy = false;
 
   /* ---------- Loading ---------- */
@@ -394,18 +403,20 @@
     if (!raf) cx.clearRect(0, 0, W, H);
   }
 
+  const totalWinners = () => Math.min(WINNERS_TARGET, winners.length + remaining.length);
   function setCounter() {
-    const total = Math.min(WINNERS_TARGET, participants.length);
-    $('counter').textContent = winners.length
+    const total = totalWinners();
+    $('counter').textContent = (winners.length
       ? `Winner ${winners.length} of ${total}`
-      : `${total} winners to be drawn`;
+      : `${total} winners to be drawn`) + (absent.length ? ` · ${absent.length} absent` : '');
   }
 
   async function draw() {
     if (busy) return;
-    const total = Math.min(WINNERS_TARGET, participants.length);
+    disarmAbsent();
+    const total = totalWinners();
     if (winners.length >= total) { showSummary(); return; }
-    busy = true; $('drawBtn').disabled = true;
+    busy = true; $('drawBtn').disabled = true; $('absentBtn').hidden = true;
 
     const idx = await randBelow(remaining.length);
     const winner = remaining.splice(idx, 1)[0];
@@ -432,6 +443,29 @@
 
     busy = false; $('drawBtn').disabled = false;
     $('drawBtn').textContent = winners.length >= total ? 'Show all winners' : 'Draw next winner';
+    $('absentBtn').hidden = false; $('absentBtn').disabled = remaining.length === 0;
+  }
+
+  /* ---------- Absent / redraw ----------
+     The latest winner can be marked absent: they lose the prize, are never drawn again,
+     and the same prize is redrawn from everyone still remaining. Needs two presses. */
+  let armTimer = 0;
+  function disarmAbsent() {
+    clearTimeout(armTimer);
+    $('absentBtn').classList.remove('armed');
+    $('absentBtn').textContent = 'Absent · Redraw';
+  }
+  function absentRedraw() {
+    const btn = $('absentBtn');
+    if (busy || btn.hidden || btn.disabled || !winners.length) return;
+    if (!btn.classList.contains('armed')) {
+      btn.classList.add('armed');
+      btn.textContent = `Confirm: ${winners[winners.length - 1].name} is absent?`;
+      armTimer = setTimeout(disarmAbsent, 4000);
+      return;
+    }
+    absent.push(winners.pop());
+    draw();
   }
 
   function showSummary() {
@@ -446,6 +480,10 @@
       const id = document.createElement('div'); id.className = 'i'; id.textContent = w.id;
       d.append(k, media, n, id); g.appendChild(d);
     });
+    const al = $('absentList');
+    al.hidden = !absent.length;
+    al.innerHTML = absent.length ? `<b>Absent (forfeited):</b> ` : '';
+    al.append(absent.map(a => `${a.name} (${a.id})`).join(' · '));
     switchTo('summary');
   }
 
@@ -454,7 +492,8 @@
   }
 
   $('start').addEventListener('click', () => {
-    remaining = participants.slice(); winners = [];
+    remaining = participants.slice(); winners = []; absent = [];
+    $('absentBtn').hidden = true; disarmAbsent();
     $('name').textContent = ''; $('pid').textContent = '';
     $('photo').style.display = 'none'; $('placeholder').style.display = 'none';
     $('drawBtn').textContent = 'Draw winner';
@@ -462,9 +501,12 @@
     setCounter(); switchTo('stage');
   });
   $('drawBtn').addEventListener('click', draw);
+  $('absentBtn').addEventListener('click', absentRedraw);
   addEventListener('keydown', e => {
     if ((e.code === 'Space' || e.code === 'Enter') && $('stage').classList.contains('active')) {
       e.preventDefault(); draw();
+    } else if (e.code === 'KeyR' && $('stage').classList.contains('active')) {
+      e.preventDefault(); absentRedraw();
     }
   });
 })();
