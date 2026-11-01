@@ -1,0 +1,473 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raffle Draw</title>
+<style>
+  :root { --bg:#0b0b0d; --fg:#f4f4f5; --mute:#8a8a93; --line:#26262b; --accent:#ffffff; }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; background: var(--bg); color: var(--fg);
+    font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; overflow: hidden; }
+  .screen { position: fixed; inset: 0; display: none; flex-direction: column; align-items: center; justify-content: center; padding: 24px; text-align: center; }
+  .screen.active { display: flex; }
+
+  h1 { font-weight: 300; letter-spacing: .3em; text-transform: uppercase; font-size: 1.1rem; color: var(--mute); margin-bottom: 40px; }
+  .row { display: flex; gap: 16px; flex-wrap: wrap; justify-content: center; margin-bottom: 24px; }
+  button, label.btn {
+    background: transparent; color: var(--fg); border: 1px solid var(--line); border-radius: 999px;
+    padding: 12px 28px; font-size: .95rem; cursor: pointer; transition: all .2s; letter-spacing: .05em;
+  }
+  button:hover:not(:disabled), label.btn:hover { border-color: var(--fg); }
+  button.primary { background: var(--fg); color: var(--bg); border-color: var(--fg); font-weight: 600; }
+  button:disabled { opacity: .3; cursor: default; }
+  input[type=file] { display: none; }
+  .status { color: var(--mute); font-size: .9rem; line-height: 1.8; min-height: 5em; }
+  .status b { color: var(--fg); font-weight: 500; }
+  .warn { color: #e0a94a; }
+
+  #counter { position: absolute; top: 28px; left: 0; right: 0; color: var(--mute); letter-spacing: .3em; font-size: .85rem; text-transform: uppercase; }
+  #photoWrap { position: relative; height: 46vh; width: min(80vw, 46vh); display: flex; align-items: center; justify-content: center; }
+  #photo { max-width: 100%; max-height: 100%; object-fit: contain; border-radius: 14px; display: none; }
+  #placeholder { width: 100%; height: 100%; border-radius: 14px; border: 1px solid var(--line); display: none;
+    align-items: center; justify-content: center; font-size: 5rem; font-weight: 200; color: var(--mute); }
+  #prize { position: absolute; left: calc(100% + 12vw); top: 50%; transition: left .9s cubic-bezier(.5,0,.2,1), transform .9s; transform: translateY(-50%); width: min(22vw, 30vh); text-align: center; display: none; }
+  #prize.on { display: block; }
+  #prize.pop { animation: prizePop .6s cubic-bezier(.2,.9,.3,1.3); }
+  #prize.delivered { left: calc(100% + 24px); }
+  @keyframes prizePop { 0% { transform: translateY(-50%) scale(.3); opacity: 0; } 100% { transform: translateY(-50%) scale(1); opacity: 1; } }
+  #prize img { width: 100%; max-height: 40vh; object-fit: contain; border-radius: 12px; display: block; }
+  #prize .pl { margin-bottom: 10px; color: var(--mute); letter-spacing: .25em; font-size: .8rem; text-transform: uppercase; }
+  #name { margin-top: 28px; font-size: clamp(2.2rem, 7vw, 5.5rem); font-weight: 600; line-height: 1.05; max-width: 92vw; }
+  #pid { margin-top: 12px; font-size: 1.05rem; color: var(--mute); letter-spacing: .25em; }
+  #photo, #placeholder, #name, #pid { transition: opacity .3s, transform .5s cubic-bezier(.2,.9,.3,1.2), filter .3s; }
+  .spinning #photo, .spinning #placeholder, .spinning #name, .spinning #pid { filter: blur(3px); opacity: .6; }
+  .reveal #photo, .reveal #placeholder, .reveal #name { animation: pop .7s cubic-bezier(.2,.9,.3,1.2); }
+  @keyframes pop { 0% { transform: scale(.88); } 100% { transform: scale(1); } }
+  #controls { position: absolute; bottom: 28px; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+  .hint { color: var(--mute); font-size: .75rem; letter-spacing: .15em; }
+
+  #grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 18px; width: min(1100px, 94vw); }
+  .card img, .card .ph { width: 100%; aspect-ratio: 1; object-fit: cover; border-radius: 10px; background: #15151a; display: flex; align-items: center; justify-content: center; color: var(--mute); font-size: 2rem; }
+  .card .n { margin-top: 8px; font-size: .95rem; font-weight: 600; }
+  .card .i { color: var(--mute); font-size: .75rem; letter-spacing: .15em; margin-top: 2px; }
+  .card .k { color: var(--mute); font-size: .7rem; margin-bottom: 6px; letter-spacing: .2em; }
+  #confetti { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+  @media (max-width: 700px) { #grid { grid-template-columns: repeat(2, 1fr); } }
+</style>
+</head>
+<body>
+
+<!-- SETUP -->
+<section id="setup" class="screen active">
+  <h1>Raffle Draw</h1>
+  <div class="row">
+    <label class="btn" for="fileList">1 · Participants file</label>
+    <label class="btn" for="fileImgs">2 · Photos folder</label>
+    <input type="file" id="fileList" accept=".txt,.csv,text/plain">
+    <input type="file" id="fileImgs" webkitdirectory directory multiple>
+  </div>
+  <div class="status" id="status">Select the participants text file and the folder containing the photos.</div>
+  <div class="row" style="margin-top:24px">
+    <button class="primary" id="start" disabled>Start</button>
+  </div>
+</section>
+
+<!-- DRAW -->
+<section id="stage" class="screen">
+  <div id="counter"></div>
+  <div id="photoWrap">
+    <img id="photo" alt="">
+    <div id="placeholder"></div>
+    <div id="prize"><div class="pl"></div><img alt=""></div>
+  </div>
+  <div id="name"></div>
+  <div id="pid"></div>
+  <div id="controls">
+    <button class="primary" id="drawBtn">Draw winner</button>
+    <div class="hint">SPACE / ENTER</div>
+  </div>
+</section>
+
+<!-- SUMMARY -->
+<section id="summary" class="screen">
+  <h1>Winners</h1>
+  <div id="grid"></div>
+</section>
+
+<canvas id="confetti"></canvas>
+
+<script>
+(() => {
+  const WINNERS_TARGET = 10;
+  const $ = id => document.getElementById(id);
+
+  let participants = [];       // {name,id,img,url}
+  let imageFiles = new Map();  // lowercased filename -> File
+  let remaining = [];
+  let winners = [];
+  let busy = false;
+
+  /* ---------- Loading ---------- */
+  function parseList(text) {
+    text = text.replace(/^\uFEFF/, '');
+    const out = [], seen = new Set(); let dupes = 0, bad = 0;
+    for (const raw of text.split(/\r?\n/)) {
+      const line = raw.trim();
+      if (!line) continue;
+      const p = line.split('|').map(s => s.trim());
+      if (p.length < 2 || !p[0] || !p[1]) { bad++; continue; }
+      if (p[1].toLowerCase() === 'id' && out.length === 0) continue; // header row
+      if (seen.has(p[1])) { dupes++; continue; }                     // one entry per ID
+      seen.add(p[1]);
+      out.push({ name: p[0], id: p[1], img: p[2] || '', url: null });
+    }
+    return { out, dupes, bad };
+  }
+
+  function matchImages() {
+    let missing = 0;
+    for (const p of participants) {
+      const key = p.img.toLowerCase();
+      const stem = key.replace(/\.[^.]+$/, '');
+      let f = imageFiles.get(key);
+      if (!f) for (const [k, file] of imageFiles) { if (k.replace(/\.[^.]+$/, '') === stem && stem) { f = file; break; } }
+      if (!f) for (const [k, file] of imageFiles) { if (k.replace(/\.[^.]+$/, '') === p.id.toLowerCase()) { f = file; break; } }
+      if (p.url) URL.revokeObjectURL(p.url);
+      p.url = f ? URL.createObjectURL(f) : null;
+      if (!f) missing++;
+    }
+    return missing;
+  }
+
+  let parseInfo = null;
+  function refreshStatus() {
+    const lines = [];
+    if (parseInfo) {
+      lines.push(`<b>${participants.length}</b> participants loaded` +
+        (parseInfo.dupes ? ` · ${parseInfo.dupes} duplicate ID(s) ignored` : '') +
+        (parseInfo.bad ? ` · ${parseInfo.bad} malformed line(s) skipped` : ''));
+    }
+    if (imageFiles.size) {
+      const missing = participants.length ? matchImages() : 0;
+      lines.push(`<b>${imageFiles.size}</b> image files found` +
+        (participants.length ? (missing ? ` · <span class="warn">${missing} participant(s) have no matching photo</span>` : ' · all photos matched') : ''));
+    }
+    if (participants.length && participants.length < WINNERS_TARGET)
+      lines.push(`<span class="warn">Only ${participants.length} participants — fewer than ${WINNERS_TARGET} winners will be drawn.</span>`);
+    $('status').innerHTML = lines.join('<br>') || 'Select the participants text file and the folder containing the photos.';
+    $('start').disabled = participants.length === 0;
+  }
+
+  // Auto-load participants.txt and photos/ from next to this page (needs start.bat / a local server;
+  // browsers block reading local files when the page is opened directly as file://).
+  async function autoLoad() {
+    let text;
+    try {
+      const res = await fetch('participants.txt', { cache: 'no-store' });
+      if (!res.ok) return;
+      text = await res.text();
+    } catch { return; } // file:// — fall back to the manual pickers
+    parseInfo = parseList(text);
+    participants = parseInfo.out;
+    $('status').innerHTML = `<b>${participants.length}</b> participants loaded · checking photos…`;
+    const results = await Promise.all(participants.map(p => new Promise(done => {
+      const url = 'photos/' + encodeURIComponent(p.img || p.id + '.jpg');
+      const im = new Image();
+      im.onload = () => { p.url = url; done(true); };
+      im.onerror = () => { p.url = null; done(false); };
+      im.src = url;
+    })));
+    const missing = results.filter(ok => !ok).length;
+    refreshStatus();
+    $('status').innerHTML += '<br>Loaded automatically from participants.txt and photos/' +
+      (missing ? ` · <span class="warn">${missing} participant(s) have no matching photo</span>` : ' · all photos matched');
+  }
+  autoLoad();
+
+  $('fileList').addEventListener('change', async e => {
+    const f = e.target.files[0]; if (!f) return;
+    parseInfo = parseList(await f.text());
+    participants = parseInfo.out;
+    refreshStatus();
+  });
+  $('fileImgs').addEventListener('change', e => {
+    imageFiles = new Map();
+    for (const f of e.target.files) {
+      if (/^image\//.test(f.type) || /\.(jpe?g|png|gif|webp|bmp|avif)$/i.test(f.name)) imageFiles.set(f.name.toLowerCase(), f);
+    }
+    refreshStatus();
+  });
+
+  /* ---------- Randomness ----------
+     Winner selection pipeline:
+       1. Entropy pool: every pointer move / key press timing is accumulated.
+       2. For each draw: SHA-256( pool || 32 CSPRNG bytes || high-res clock || draw counter )
+          -> 256-bit seed.
+       3. Seed feeds a counter-mode SHA-256 DRBG (hash(seed || counter) blocks).
+       4. An unbiased index is taken from the DRBG stream with rejection sampling
+          (no modulo bias), and winners are removed from the pool (no repeats).
+     The cycling names/photos during the animation are purely cosmetic; the winner
+     is fixed before the animation starts. */
+  let pool = '';
+  let drawCounter = 0;
+  const addEntropy = e => {
+    pool += `${e.clientX|0},${e.clientY|0},${e.timeStamp.toFixed(3)},${e.key||''};`;
+    if (pool.length > 8192) pool = pool.slice(-4096);
+  };
+  addEventListener('pointermove', addEntropy, { passive: true });
+  addEventListener('keydown', addEntropy);
+  addEventListener('pointerdown', addEntropy);
+
+  const enc = new TextEncoder();
+  const hasSubtle = !!(crypto && crypto.subtle);
+
+  async function sha256(bytes) {
+    if (hasSubtle) return new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+    return null;
+  }
+  const concat = (...arrs) => {
+    const out = new Uint8Array(arrs.reduce((n, a) => n + a.length, 0));
+    let o = 0; for (const a of arrs) { out.set(a, o); o += a.length; }
+    return out;
+  };
+
+  async function makeStream() {
+    const csprng = crypto.getRandomValues(new Uint8Array(32));
+    const ctx = enc.encode(`${pool}|${performance.now()}|${Date.now()}|${++drawCounter}`);
+    let seed = await sha256(concat(ctx, csprng));
+    let counter = 0, buf = new Uint8Array(0), pos = 0;
+    async function nextBlock() {
+      if (seed) {
+        const c = new Uint8Array(4); new DataView(c.buffer).setUint32(0, counter++);
+        buf = await sha256(concat(seed, c));
+      } else {
+        buf = crypto.getRandomValues(new Uint8Array(32)); // fallback: raw CSPRNG
+      }
+      pos = 0;
+    }
+    return async function u32() {
+      if (pos + 4 > buf.length) await nextBlock();
+      const v = new DataView(buf.buffer, buf.byteOffset + pos, 4).getUint32(0);
+      pos += 4; return v;
+    };
+  }
+
+  async function randBelow(n) {
+    const u32 = await makeStream();
+    const limit = Math.floor(0x100000000 / n) * n; // rejection sampling
+    for (;;) { const x = await u32(); if (x < limit) return x % n; }
+  }
+
+  /* ---------- Draw ---------- */
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+  const show = (p) => {
+    $('name').textContent = p.name;
+    $('pid').textContent = p.id;
+    const img = $('photo'), ph = $('placeholder');
+    if (p.url) { img.src = p.url; img.style.display = 'block'; ph.style.display = 'none'; }
+    else {
+      img.style.display = 'none'; ph.style.display = 'flex';
+      ph.textContent = p.name.split(/\s+/).map(w => w[0]).slice(0, 2).join('').toUpperCase();
+    }
+  };
+
+  const ord = n => n + (['th','st','nd','rd'][(n % 100 >= 11 && n % 100 <= 13) ? 0 : Math.min(n % 10, 4) % 4] || 'th');
+  // 1st winner drawn gets the 10th prize, counting down to the 1st prize
+  const prizeNo = i => WINNERS_TARGET - i;
+  function showPrize(i) {
+    const n = prizeNo(i), el = $('prize');
+    el.querySelector('.pl').textContent = `${ord(n)} prize`;
+    el.querySelector('img').src = `prizes/${n}.jpg`;
+    el.classList.remove('delivered', 'pop'); void el.offsetWidth;
+    el.classList.add('on', 'pop');
+  }
+
+  /* ---------- Confetti ---------- */
+  const cv = $('confetti'), cx = cv.getContext('2d');
+  const COLORS = ['#ffd84d', '#ffb800', '#ff5e7e', '#ff2d55', '#4dd2ff', '#2f7bff', '#7dff8a', '#c78bff', '#ffffff', '#ff9f43', '#f5e6a8'];
+  const SHAPES = ['rect', 'rect', 'rect', 'circle', 'ribbon', 'ribbon', 'star'];
+  let bits = [], fx = [], raf = 0, rainFrames = 0, W = 0, H = 0;
+  const rnd = (a, b) => a + Math.random() * (b - a);
+  const pick = arr => arr[Math.random() * arr.length | 0];
+
+  function spawn(x, y, vx, vy, opts = {}) {
+    const shape = opts.shape || pick(SHAPES);
+    bits.push({ x, y, vx, vy, shape, c: pick(COLORS), life: 0,
+      w: shape === 'ribbon' ? rnd(4, 6) : rnd(7, 14), h: shape === 'ribbon' ? rnd(22, 40) : rnd(9, 18),
+      r: rnd(0, 6.28), vr: rnd(-.3, .3), flip: rnd(.08, .2), sway: rnd(0, 6.28),
+      drag: opts.drag || rnd(.975, .99), g: opts.g || rnd(.18, .3) });
+  }
+  function sparkle(x, y, vx, vy) {
+    bits.push({ x, y, vx, vy, shape: 'spark', c: pick(['#fff', '#fff7c2', '#ffd84d']), life: 0,
+      w: rnd(1.5, 3.5), r: 0, vr: 0, flip: 0, sway: 0, drag: .95, g: .05, max: rnd(40, 90) });
+  }
+  function cannon(side, n) {
+    const x = side ? W : 0;
+    for (let i = 0; i < n; i++) {
+      const a = (side ? -1 : 1) * rnd(Math.PI / 7, Math.PI / 2.6), v = rnd(16, 30);
+      spawn(x, H, Math.sin(a) * v, -Math.cos(a) * v * 1.35);
+    }
+  }
+  function burst(x, y, n) {
+    for (let i = 0; i < n; i++) {
+      const a = rnd(0, 6.28), v = rnd(6, 24);
+      spawn(x, y, Math.cos(a) * v, Math.sin(a) * v - 6);
+    }
+    for (let i = 0; i < 120; i++) { const a = rnd(0, 6.28), v = rnd(4, 18); sparkle(x, y, Math.cos(a) * v, Math.sin(a) * v); }
+    fx.push({ type: 'flash', x, y, t: 0 }, { type: 'ring', x, y, t: 0 }, { type: 'ring', x, y, t: -8 });
+  }
+
+  function confetti() {
+    W = innerWidth; H = innerHeight;
+    cv.width = W * devicePixelRatio; cv.height = H * devicePixelRatio;
+    cx.setTransform(devicePixelRatio, 0, 0, devicePixelRatio, 0, 0);
+    const r = $('photoWrap').getBoundingClientRect();
+    burst(r.left + r.width / 2, r.top + r.height / 2, 320);
+    [0, 350, 700, 1100].forEach((t, i) => setTimeout(() => { cannon(0, 160 - i * 20); cannon(1, 160 - i * 20); }, t));
+    rainFrames = 260; // confetti shower from the top
+    for (let i = 0; i < 6; i++) setTimeout(() => {
+      const x = rnd(W * .1, W * .9), y = rnd(H * .1, H * .45);
+      for (let k = 0; k < 60; k++) { const a = rnd(0, 6.28), v = rnd(2, 12); sparkle(x, y, Math.cos(a) * v, Math.sin(a) * v); }
+      for (let k = 0; k < 40; k++) { const a = rnd(0, 6.28), v = rnd(3, 13); spawn(x, y, Math.cos(a) * v, Math.sin(a) * v - 3); }
+      fx.push({ type: 'flash', x, y, t: 0, small: true });
+    }, 300 + i * 380);
+    if (!raf) raf = requestAnimationFrame(tick);
+  }
+
+  function star(r) {
+    cx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const a = i * Math.PI / 5 - Math.PI / 2, d = i % 2 ? r * .45 : r;
+      cx.lineTo(Math.cos(a) * d, Math.sin(a) * d);
+    }
+    cx.closePath(); cx.fill();
+  }
+
+  function tick() {
+    cx.clearRect(0, 0, W, H);
+    if (rainFrames > 0) { rainFrames--; for (let i = 0; i < 7; i++) spawn(rnd(0, W), -20, rnd(-2, 2), rnd(1, 4), { drag: .99, g: rnd(.06, .12) }); }
+
+    for (const f of fx) {
+      f.t++;
+      if (f.t < 0) continue;
+      if (f.type === 'flash') {
+        const k = f.t / (f.small ? 25 : 40), rad = (f.small ? 120 : 420) * (.4 + k);
+        const g = cx.createRadialGradient(f.x, f.y, 0, f.x, f.y, rad);
+        g.addColorStop(0, `rgba(255,240,180,${.85 * (1 - k)})`); g.addColorStop(1, 'rgba(255,200,80,0)');
+        cx.fillStyle = g; cx.fillRect(f.x - rad, f.y - rad, rad * 2, rad * 2);
+        f.done = k >= 1;
+      } else {
+        const k = f.t / 45;
+        cx.strokeStyle = `rgba(255,216,77,${1 - k})`; cx.lineWidth = 6 * (1 - k) + 1;
+        cx.beginPath(); cx.arc(f.x, f.y, 40 + k * Math.max(W, H) * .6, 0, 6.28); cx.stroke();
+        f.done = k >= 1;
+      }
+    }
+    fx = fx.filter(f => !f.done);
+
+    bits = bits.filter(b => b.y < H + 60 && b.x > -100 && b.x < W + 100 && b.life < (b.max || 900));
+    for (const b of bits) {
+      b.vy += b.g; b.vx *= b.drag; b.vy *= b.drag; b.life++;
+      b.x += b.vx + (b.shape === 'spark' ? 0 : Math.sin(b.life * .05 + b.sway) * .6);
+      b.y += b.vy; b.r += b.vr;
+      cx.save(); cx.translate(b.x, b.y);
+      if (b.shape === 'spark') {
+        cx.globalAlpha = Math.max(0, 1 - b.life / b.max) * (.6 + .4 * Math.sin(b.life * .8));
+        cx.fillStyle = b.c; cx.shadowColor = '#ffd84d'; cx.shadowBlur = 8;
+        cx.beginPath(); cx.arc(0, 0, b.w, 0, 6.28); cx.fill();
+      } else {
+        cx.rotate(b.r); cx.scale(1, Math.cos(b.life * b.flip));
+        cx.fillStyle = b.c;
+        if (b.shape === 'circle') { cx.beginPath(); cx.arc(0, 0, b.w / 2, 0, 6.28); cx.fill(); }
+        else if (b.shape === 'star') star(b.w * .8);
+        else if (b.shape === 'ribbon') {
+          cx.beginPath(); cx.moveTo(-b.w / 2, -b.h / 2);
+          for (let y = -b.h / 2; y <= b.h / 2; y += 4) cx.lineTo(Math.sin(y * .3 + b.life * .3) * 3 - b.w / 2, y);
+          for (let y = b.h / 2; y >= -b.h / 2; y -= 4) cx.lineTo(Math.sin(y * .3 + b.life * .3) * 3 + b.w / 2, y);
+          cx.closePath(); cx.fill();
+        } else cx.fillRect(-b.w / 2, -b.h / 2, b.w, b.h);
+      }
+      cx.restore();
+    }
+    raf = (bits.length || fx.length || rainFrames) ? requestAnimationFrame(tick) : 0;
+    if (!raf) cx.clearRect(0, 0, W, H);
+  }
+
+  function setCounter() {
+    const total = Math.min(WINNERS_TARGET, participants.length);
+    $('counter').textContent = winners.length
+      ? `Winner ${winners.length} of ${total}`
+      : `${total} winners to be drawn`;
+  }
+
+  async function draw() {
+    if (busy) return;
+    const total = Math.min(WINNERS_TARGET, participants.length);
+    if (winners.length >= total) { showSummary(); return; }
+    busy = true; $('drawBtn').disabled = true;
+
+    const idx = await randBelow(remaining.length);
+    const winner = remaining.splice(idx, 1)[0];
+    winners.push(winner);
+    showPrize(winners.length - 1);
+
+    const stage = $('stage');
+    stage.classList.remove('reveal'); stage.classList.add('spinning');
+    $('counter').textContent = `Drawing winner ${winners.length} of ${total}…`;
+
+    // cosmetic spin: fast cycle that decelerates
+    const all = participants;
+    let delay = 45, last = -1;
+    while (delay < 420) {
+      let k; do { k = Math.floor(Math.random() * all.length); } while (all.length > 1 && k === last);
+      last = k; show(all[k]);
+      await sleep(delay); delay *= 1.1;
+    }
+    show(winner);
+    $('prize').classList.add('delivered');
+    stage.classList.remove('spinning'); void stage.offsetWidth; stage.classList.add('reveal');
+    confetti();
+    setCounter();
+
+    busy = false; $('drawBtn').disabled = false;
+    $('drawBtn').textContent = winners.length >= total ? 'Show all winners' : 'Draw next winner';
+  }
+
+  function showSummary() {
+    const g = $('grid'); g.innerHTML = '';
+    winners.forEach((w, i) => {
+      const d = document.createElement('div'); d.className = 'card';
+      const k = document.createElement('div'); k.className = 'k'; k.textContent = `${ord(prizeNo(i))} PRIZE`;
+      let media;
+      if (w.url) { media = document.createElement('img'); media.src = w.url; }
+      else { media = document.createElement('div'); media.className = 'ph'; media.textContent = w.name[0]; }
+      const n = document.createElement('div'); n.className = 'n'; n.textContent = w.name;
+      const id = document.createElement('div'); id.className = 'i'; id.textContent = w.id;
+      d.append(k, media, n, id); g.appendChild(d);
+    });
+    switchTo('summary');
+  }
+
+  function switchTo(id) {
+    document.querySelectorAll('.screen').forEach(s => s.classList.toggle('active', s.id === id));
+  }
+
+  $('start').addEventListener('click', () => {
+    remaining = participants.slice(); winners = [];
+    $('name').textContent = ''; $('pid').textContent = '';
+    $('photo').style.display = 'none'; $('placeholder').style.display = 'none';
+    $('drawBtn').textContent = 'Draw winner';
+    $('prize').classList.remove('on', 'pop', 'delivered');
+    setCounter(); switchTo('stage');
+  });
+  $('drawBtn').addEventListener('click', draw);
+  addEventListener('keydown', e => {
+    if ((e.code === 'Space' || e.code === 'Enter') && $('stage').classList.contains('active')) {
+      e.preventDefault(); draw();
+    }
+  });
+})();
+</script>
+</body>
+</html>
