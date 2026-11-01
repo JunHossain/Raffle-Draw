@@ -1,5 +1,10 @@
 @echo off
 cd /d "%~dp0"
-echo Raffle Draw running at http://localhost:8000  -  close this window to stop.
-start "" /min cmd /c "timeout /t 2 >nul & start http://localhost:8000/index.html"
-python -m http.server 8000 --bind 127.0.0.1
+if not exist "participants.txt" (
+  echo Could not find participants.txt next to start.bat.
+  echo If you opened this from inside the .rar, extract the whole folder first, then run start.bat again.
+  pause
+  exit /b 1
+)
+powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0server.ps1"
+if errorlevel 1 pause
